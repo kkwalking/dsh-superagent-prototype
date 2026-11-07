@@ -124,6 +124,28 @@ describe('eval', () => {
     expect(h.outbox).toEqual([{ id: key('ack', '1'), channel: trigger('1').channel, text: 'ok', kind: 'acknowledgement', ticketId: ticket.id }])
     expect(h.executor.start).toHaveBeenCalledOnce()
   })
+  it('posts a durable notice to the request\'s conversation when a ticket is blocked, so a person is told even if the main Session never replies', () => {
+    const h = harness()
+    const ticketId = accepted(h).ticketId!
+    expect(h.outbox.some(message => message.kind === 'notice')).toBe(false)
+    h.engine.report(ticketId, { state: 'blocked', summary: 'needs an admin password' })
+    const notice = h.outbox.find(message => message.kind === 'notice')!
+    expect(notice).toMatchObject({ channel: trigger('1').channel, ticketId })
+    expect(notice.text).toContain('needs an admin password')
+    // One blocked report yields exactly one notice, and progress does not.
+    h.engine.report(ticketId, { state: 'blocked', summary: 'still blocked' })
+    h.engine.report(ticketId, { state: 'progress', summary: 'working' })
+    expect(h.outbox.filter(message => message.kind === 'notice')).toHaveLength(2)
+  })
+  it('does not post a blocked notice when the request did not come from a person with a channel', () => {
+    const h = harness()
+    // A trigger with no channel: nothing to post to.
+    h.engine.receive(trigger('9', { threads: [{ source: 'chat', id: 't2' }], channel: undefined })); h.pump()
+    const decision = h.decide(h.requests.at(-1)!, { kind: 'accept', title: 'Fix', scope: 'small', reason: 'requested', acknowledgement: 'ok' })
+    h.settle()
+    h.engine.report(decision.ticketId!, { state: 'blocked', summary: 'stuck' })
+    expect(h.outbox.filter(message => message.kind === 'notice')).toHaveLength(0)
+  })
   it('refuses to decide an eval that a later eval replaced, and decides the later one', async () => {
     const h = harness()
     h.engine.receive(trigger('1')); h.pump()

@@ -54,13 +54,19 @@ export function ChatPanel() {
     </div>
     <div className="sa-chat-log" style={{ flex: 1, overflowY: 'auto', padding: '16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
       {messages.length === 0 && <div style={{ color: 'var(--dt-color-text-secondary, #6b7280)', fontSize: 13 }}>{t('chatEmpty')}</div>}
-      {messages.map(message => <div key={message.id} style={{ display: 'flex', justifyContent: message.role === 'person' ? 'flex-end' : 'flex-start' }}>
-        <div style={{ maxWidth: '78%', padding: '8px 12px', borderRadius: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 14,
-          background: message.role === 'person' ? 'var(--dt-color-accent, #2563eb)' : 'var(--dt-color-fill, #f3f4f6)',
-          color: message.role === 'person' ? '#fff' : 'inherit', opacity: message.role === 'notice' ? 0.75 : 1 }}>
-          {message.text}
-        </div>
-      </div>)}
+      {messages.map(message => message.role === 'notice'
+        ? <div key={message.id} style={{ alignSelf: 'center', maxWidth: '88%', padding: '6px 10px', borderRadius: 8, fontSize: 12.5,
+            whiteSpace: 'pre-wrap', wordBreak: 'break-word', textAlign: 'center', lineHeight: 1.5,
+            background: 'var(--dt-color-warning-fill, #fef3c7)', color: 'var(--dt-color-warning-text, #92400e)' }}>
+            {message.text}
+          </div>
+        : <div key={message.id} style={{ display: 'flex', justifyContent: message.role === 'person' ? 'flex-end' : 'flex-start' }}>
+            <div style={{ maxWidth: '78%', padding: '8px 12px', borderRadius: 10, whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontSize: 14,
+              background: message.role === 'person' ? 'var(--dt-color-accent, #2563eb)' : 'var(--dt-color-fill, #f3f4f6)',
+              color: message.role === 'person' ? '#fff' : 'inherit' }}>
+              {message.text}
+            </div>
+          </div>)}
       <div ref={endRef} />
     </div>
     <div className="sa-chat-input" style={{ display: 'flex', gap: 8, alignItems: 'flex-end', padding: '12px 16px', borderTop: '1px solid var(--dt-color-border, #e5e7eb)' }}>

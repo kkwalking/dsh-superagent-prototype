@@ -30,7 +30,8 @@ const link = (address: Record<string, string>): { url: string; label: Localized 
 export async function sendWeb(host: Pick<import('./host.ts').SourceContext, 'state'>, message: OutboundMessage): Promise<'sent' | 'gone'> {
   const conversation = message.channel.address.conversation
   if (!conversation) return 'gone'
-  appendChat(host, conversation, { id: key('webmsg', message.id), role: 'agent', text: message.text, at: new Date().toISOString() })
+  // A `notice` is a host status line (such as a ticket stuck for a person), shown distinctly from the agent's replies.
+  appendChat(host, conversation, { id: key('webmsg', message.id), role: message.kind === 'notice' ? 'notice' : 'agent', text: message.text, at: new Date().toISOString() })
   return 'sent'
 }
 

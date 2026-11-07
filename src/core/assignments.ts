@@ -125,6 +125,10 @@ export class Assignments extends EnginePart {
     if (report.answers) this.takeUp(ticketId, report.answers)
     if (report.state === 'blocked' || report.state === 'failed') ticket.undelivered = ticket.undelivered.filter(id => !automatic(ticket.inputs.find(input => input.id === id)))
     this.repo.tickets.save(ticket)
+    // A blocked ticket is stuck until a person acts (such as a GUI authorization the worker cannot complete unattended). The
+    // main Session also hears this as a report, but that reminder is best-effort: post a durable notice straight into the
+    // conversation the request came from, so the person is told even if the main Session never replies.
+    if (report.state === 'blocked') this.noticeBlocked(ticket, report.summary, at)
     // A ticket that follows Threads ends with them: a ready report ends it only once followsDone holds, with that outcome.
     const ready = !ticket.follows?.length ? 'completed' : this.tickets.followsDone(ticket)?.outcome
     // A dropped report after a close the ticket deferred ends it as the close did, which its final notice tells.
@@ -136,5 +140,16 @@ export class Assignments extends EnginePart {
   private running(ticketId: string, assignmentId: string): Ticket | undefined {
     const ticket = this.require(ticketId)
     return liveTicket(ticket) && runningAssignment(ticket)?.id === assignmentId ? ticket : undefined
+  }
+  /**
+   * Posts a durable `notice` into the conversation a ticket's request came from, telling the person it is blocked and why.
+   * Keyed by the report time and summary so identical re-reads dedupe while a fresh blocked report posts its own notice.
+   */
+  private noticeBlocked(ticket: Ticket, summary: string, at: string): void {
+    const trigger = this.repo.triggers.get(ticket.origin.triggerId)
+    if (!trigger?.channel || !trigger.human) return
+    const head = trigger.channel.source === 'web' ? '这张工单受阻，需要你处理' : 'This ticket is blocked and needs you'
+    this.options.outbox.send({ id: key('blocked-notice', ticket.id, at, summary), channel: trigger.channel, ticketId: ticket.id, kind: 'notice',
+      text: `${head}：\n${summary}` })
   }
 }

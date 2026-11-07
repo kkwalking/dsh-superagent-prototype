@@ -62,6 +62,12 @@ describe('web chat log', () => {
     expect(log[0]!.id).toBeTruthy()
   })
 
+  it('records a host notice as a notice line, distinct from an agent reply', async () => {
+    const host = stateful()
+    await sendWeb(host, { id: 'n-1', kind: 'notice', text: '这张工单受阻，需要你处理', channel: webChannel('c') })
+    expect(readChat(host, 'c')[0]).toMatchObject({ role: 'notice', text: '这张工单受阻，需要你处理' })
+  })
+
   it('drops a reply whose address names no conversation', async () => {
     const host = stateful()
     const result = await sendWeb(host, { id: 'x', kind: 'reply', text: 'nope', channel: { source: 'web', thread: 'c', address: {} } })
