@@ -43,8 +43,9 @@ export function ChatPanel() {
   }
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Enter sends; Shift+Enter inserts a newline.
-    if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void send() }
+    // Enter inserts a newline; Command+Enter (⌘↵ on macOS, Ctrl+Enter elsewhere) sends, so a stray Enter never submits a
+    // half-typed message — especially while toggling an input method.
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send() }
   }
 
   return <div className="sa-chat" style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>

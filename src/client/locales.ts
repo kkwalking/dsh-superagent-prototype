@@ -101,7 +101,7 @@ const TEXT = {
   chatPanel: ['对话', 'Chat'],
   chatTitle: ['和智能体对话', 'Chat with the agent'],
   chatEmpty: ['发一条消息开始。它会像一次请求一样被评估、接单并在对应工作区执行。', 'Send a message to begin. It is assessed like a request, accepted, and run in the matching workspace.'],
-  chatPlaceholder: ['输入消息，Enter 发送，Shift+Enter 换行', 'Type a message; Enter to send, Shift+Enter for a new line'],
+  chatPlaceholder: ['输入消息，Enter 换行，⌘+Enter 发送', 'Type a message; Enter for a new line, ⌘+Enter to send'],
   chatSend: ['发送', 'Send'],
   openMaster: ['打开主 Session', 'Open main Session'],
   pagesLabel: ['dsh-superagent 页面', 'dsh-superagent pages'],
