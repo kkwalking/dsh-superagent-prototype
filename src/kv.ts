@@ -6,6 +6,7 @@ import type { PromptVersion } from './app/prompts.ts'
 import type { SettingsVersion } from './app/store.ts'
 import type { SettingsSave } from './policy.ts'
 import type { Retry } from './sources/github.ts'
+import type { WebChatMessage } from './sources/web-trigger.ts'
 
 /** Key of a KV record whose value has type `V`; a plain string represents an untyped key. */
 export type Key<V> = string & { readonly __value?: V }
@@ -52,6 +53,11 @@ export const KV = {
    * Feishu Source: known chats (`true` for direct messages); per-chat history cursor and active topics mapped from topic ID
    * to last-seen timestamp; and per-polled-thread seen message IDs and initialization flag.
    */
+  /** Telegram Source: the next `getUpdates` offset, and the chat titles resolved for Thread labels. */
+  telegram: { offset: record<number>('telegram-offset'), chats: record<Record<string, string>>('telegram-chats'),
+    bot: record<{ id: number; username: string; name: string }>('telegram-bot') },
+  /** Web chat Source: each conversation's message log (person and agent turns, oldest first), keyed by conversation id. */
+  web: { messages: family<WebChatMessage[], [conversation: string]>('web-chat:') },
   feishu: { chats: record<Record<string, boolean>>('feishu-chats'), history: family<string, [chat: string]>('feishu-history:'),
     topics: family<Record<string, string>, [chat: string]>('feishu-history-threads:'),
     seen: family<string[], [thread: string]>('thread-seen:'), initialized: family<boolean, [thread: string]>('thread-initialized:') },

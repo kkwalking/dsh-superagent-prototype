@@ -47,15 +47,35 @@ export const GithubAccountsSchema = z.object({
   cli: z.string().trim().default(''),
 })
 export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
+/**
+ * The Telegram Source names where its bot token lives, never the token itself: the settings store and the management
+ * API return a Source's config verbatim, so a token kept here would be written to the database in clear text and
+ * served to every panel reader. `tokenEnv` names an environment variable `~/.dsh/.env` already provides; `apiBase` is
+ * for a local stand-in in tests.
+ */
+export const TelegramBotSchema = z.object({
+  tokenEnv: z.string().trim().regex(/^[A-Z][A-Z0-9_]*$/, 'An environment variable name').default(''),
+  apiBase: z.string().trim().url().default('https://api.telegram.org'),
+}).strict()
 /** Source configuration keys that affect deployment setup and trigger a restart when changed. */
-export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = { github: Object.keys(GithubAccountsSchema.shape), feishu: Object.keys(FeishuBotSchema.shape) }
+export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = { github: Object.keys(GithubAccountsSchema.shape), feishu: Object.keys(FeishuBotSchema.shape),
+  telegram: Object.keys(TelegramBotSchema.shape) }
 
 export interface Deployment extends Machine {
+  /** The primary GitHub repository (owner/name), or empty when no GitHub Source is configured. Kept for the GitHub Source. */
   repository: string
-  github: { cli: string; login: string; noreply: string }
+  /**
+   * The agent's GitHub identity, verified from the configured CLI. Absent when no GitHub Source is configured, in which
+   * case the GitHub Source stays off and workspaces are plain directories prepared however the operator's `prepare`
+   * command chooses (local, Gitee, GitLab, a bare repo, or nothing at all).
+   */
+  github?: { cli: string; login: string; noreply: string }
   feishu?: FeishuBot
+  telegram?: TelegramBot
 }
 export interface FeishuBot { cli: string; appId: string; brand: 'feishu' | 'lark'; botId: string; name: string }
+/** The agent's Telegram identity, resolved from the token `resolveTelegramBot` read out of the environment. */
+export interface TelegramBot { apiBase: string; id: number; username: string; name: string }
 
 /** Resolve a command name or absolute path to an executable file, ignoring the worker shim directory. */
 export function executable(name: string, path: string, exclude?: string): string {
@@ -83,12 +103,17 @@ function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
   const result = schema.safeParse(value)
   return result.success ? result.data : undefined
 }
-/** Verify the agent's GitHub CLI identity and push access to the configured repository. */
+/**
+ * Resolve the GitHub identity when a repository is configured. A GitHub Source is optional: with no repository configured
+ * this returns `{ repository: '', github: undefined }` so the rest of dsh-superagent (workspaces, Feishu, Telegram, chat)
+ * runs without any Git hosting. With a repository it verifies the agent CLI's account can push, as before.
+ */
 export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
   const { stateDir } = machine
   const accounts = GithubAccountsSchema.parse(github ?? {})
   const remote = accounts.repository
-  if (!remote) throw new SetupError('repositoryUnset')
+  // No GitHub Source: valid deployment, GitHub stays off. Nothing else needs Git hosting.
+  if (!remote) return { ...machine, repository: '' }
   if (!accounts.cli) throw new SetupError('agentCliUnset')
   let cli: string
   try { cli = executable(accounts.cli, path, workerBin(stateDir)) } catch (error) { throw new SetupError('agentCliMissing', { output: reason(error) }) }
@@ -128,4 +153,34 @@ export async function resolveFeishuBot(machine: Machine, feishu: unknown, probe:
   const info = parsed(BotInfo, (await run('api', 'GET', '/open-apis/bot/v3/info', '--as', 'bot', '--format', 'ndjson')).split('\n')[0] ?? '')
   if (!info) return fail(new SetupError('feishuNoBot'))
   return { cli, appId: status.appId, brand: status.brand, botId: info.bot.open_id, name: info.bot.app_name }
+}
+
+/** The `getMe` answer: the bot's identity, which decides which mentions address it and which message to reply to. */
+const TelegramMe = z.object({ id: z.number().int(), is_bot: z.literal(true), first_name: z.string(), username: z.string() })
+/**
+ * Verify the Telegram bot token the configured environment variable holds, and return the bot's identity.
+ *
+ * The token is read from the environment on every setup run rather than stored, so a rotated token takes effect
+ * without writing it anywhere. A missing variable or a token Telegram rejects is a setup problem the operator fixes in
+ * `~/.dsh/.env`, not in the panel.
+ */
+export async function resolveTelegramBot(telegram: unknown): Promise<TelegramBot | undefined> {
+  // The caller passes the Source's whole config, which carries fields this check does not read (chats, poll
+  // settings); only the token variable and the API base matter here, so the strict schema must not reject the rest.
+  const raw = (telegram ?? {}) as { tokenEnv?: unknown; apiBase?: unknown }
+  // An empty token variable means "not configured yet", not a malformed value: the check is skipped, exactly as an
+  // unset Feishu CLI is, so the Source simply stays out until an operator names the variable.
+  if (typeof raw.tokenEnv !== 'string' || raw.tokenEnv.trim() === '') return undefined
+  const { tokenEnv, apiBase } = TelegramBotSchema.parse({ tokenEnv: raw.tokenEnv.trim(), ...raw.apiBase !== undefined ? { apiBase: raw.apiBase } : {} })
+  const token = process.env[tokenEnv]?.trim()
+  if (!token) throw new SetupError('telegramTokenUnset', { variable: tokenEnv })
+  const deadline = AbortSignal.timeout(15_000)
+  let answer: Response
+  try { answer = await fetch(`${apiBase}/bot${token}/getMe`, { signal: deadline }) }
+  catch (error) { throw new SetupError('telegramUnreachable', { output: reason(error) }) }
+  const body = await answer.json().catch(() => undefined) as { ok?: boolean; result?: unknown; description?: string } | undefined
+  if (!body?.ok) throw new SetupError('telegramTokenRejected', { output: body?.description ?? `HTTP ${answer.status}` })
+  const me = TelegramMe.safeParse(body.result)
+  if (!me.success) throw new SetupError('telegramNoBot', { output: JSON.stringify(body.result).slice(0, 200) })
+  return { apiBase, id: me.data.id, username: me.data.username, name: me.data.first_name }
 }

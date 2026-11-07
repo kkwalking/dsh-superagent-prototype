@@ -14,6 +14,10 @@ export const HEALTH_TEXT = {
   feishuCliUnset: 'The Source is on, and its bot lark-cli is not set',
   feishuBotMissing: 'Waiting for the Feishu bot',
   pollFailures: '{count} consecutive failed polls; last: {error}',
+  telegramListening: 'Listening for Telegram messages',
+  telegramReceived: '{count} Telegram messages received',
+  telegramTokenUnset: 'The Telegram bot token variable {variable} is not set',
+  telegramUnavailable: 'Telegram could not be reached: {output}',
 } as const
 export type HealthCode = keyof typeof HEALTH_TEXT
 export type Health = { state: 'starting' | 'ready' | 'paused' | 'error'; detail: string; at?: string; code?: HealthCode; values?: Record<string, string> }

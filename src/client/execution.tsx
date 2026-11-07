@@ -3,7 +3,7 @@ import { useRef, useState } from 'react'
 import { TICKET_FILTERS, type TicketFilter } from '../app/api.ts'
 import { LIMITS } from '../limits.ts'
 import { usePoll, type SettingsView, type SourceView, type StateView } from './api.ts'
-import { DisclosureRow, Icon, InfoTip, Input, Pill } from './controls.tsx'
+import { DisclosureRow, Button, Icon, InfoTip, Input, Pill } from './controls.tsx'
 import { SaveBar } from './draft.tsx'
 import { usePanel } from './provider.tsx'
 import { TicketLine } from './rows.tsx'
@@ -107,6 +107,18 @@ export function ExecutionSettings() {
             : t('executionDirectoryDefault', { root: environment.root })}>
             <Input className="dt-mono" value={value.directory} placeholder={t('executionDirectoryEmpty')} spellCheck={false} pattern="/.*"
               onChange={event => edit({ directory: event.target.value })} />
+          </Field>
+          <Field label={t('workspaces')} hint={t('workspacesHint')} note={value.workspaces.length ? undefined : t('workspacesEmpty')}>
+            <div className="dt-form">
+              {value.workspaces.map((workspace, index) => <div key={index} className="dt-row" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Input className="dt-mono" style={{ maxWidth: 160 }} value={workspace.id} placeholder={t('workspaceId')} spellCheck={false}
+                  onChange={event => edit({ workspaces: value.workspaces.map((item, at) => at === index ? { ...item, id: event.target.value } : item) })} />
+                <Input className="dt-mono" value={workspace.directory} placeholder={t('workspaceDirectoryEmpty')} spellCheck={false} pattern="/.*|"
+                  onChange={event => edit({ workspaces: value.workspaces.map((item, at) => at === index ? { ...item, directory: event.target.value } : item) })} />
+                <Button variant="ghost" size="sm" onClick={() => edit({ workspaces: value.workspaces.filter((_, at) => at !== index) })}>−</Button>
+              </div>)}
+              <Button variant="ghost" size="sm" onClick={() => edit({ workspaces: [...value.workspaces, { id: '', directory: '' }] })}>{t('workspaceAdd')}</Button>
+            </div>
           </Field>
           <Field label={t('prepareCommand')} hint={t('prepareCommandHint')}>
             <textarea ref={prepare} className="dt-textarea dt-mono" rows={3} maxLength={LIMITS.prepareCommand} spellCheck={false}

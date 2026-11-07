@@ -3,3 +3,7 @@ lib/
 .artifacts/
 .env
 coverage/
+.pnpm-store/
+.tmp/
+__pycache__/
+*.pyc

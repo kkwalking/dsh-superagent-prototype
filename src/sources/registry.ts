@@ -4,6 +4,7 @@ import type { Commands } from '../infra/commands.ts'
 import { HealthBoard, type HealthEntry } from '../infra/health.ts'
 import { AdmissionTableSchema, type Settings } from '../policy.ts'
 import type { ChannelLink, ChannelLinks, SourceInstance, SourceKind, TriggerContext, VariableSpec } from './kind.ts'
+import type { SourceContext } from './host.ts'
 
 
 /**
@@ -14,7 +15,9 @@ export class SourceRegistry implements SourceScope {
   private readonly kinds = new Map<string, SourceKind>()
   private readonly health = new Map<string, HealthEntry>()
   constructor(private readonly settings: () => Settings, private readonly board: Pick<HealthBoard, 'claim'> = new HealthBoard(),
-    private readonly registered: (kind: SourceKind) => () => void = () => () => {}) {}
+    private readonly registered: (kind: SourceKind) => () => void = () => () => {},
+    /** Source-scoped KV access passed to a Channel's `send`, so a Source without an external transport (web chat) can record replies. */
+    private readonly channelState: Pick<SourceContext, 'state'> = { state: { get: () => undefined, set: () => {}, keys: () => [] } }) {}
 
   /** Registers a SourceKind, claims its health entries on HealthBoard (rejecting `sync:` prefixes owned by Settings), and returns an unregister disposer. */
   register<C extends Record<string, unknown>>(kind: SourceKind<C>): () => void {
@@ -95,7 +98,13 @@ export class SourceRegistry implements SourceScope {
   async send(message: OutboundMessage, commands: Commands): Promise<'sent' | 'gone' | 'waiting'> {
     const kind = this.kinds.get(message.channel.source)
     if (!kind) return 'waiting'
-    return kind.channel ? kind.channel.send({ commands }, message) : 'gone'
+    // The Channel reads its own Source's config (a token name, an API base) instead of the global deployment, so a
+    // kind such as Telegram can reply while the GitHub deployment is still unconfigured.
+    const configOf = <C extends Record<string, unknown>>(id: string): C | undefined => {
+      const instance = this.instance<C>(id)
+      return instance?.enabled ? instance.config : undefined
+    }
+    return kind.channel ? kind.channel.send({ commands, config: configOf, state: this.channelState.state }, message) : 'gone'
   }
   link(channel: ChannelRef, links: ChannelLinks): ChannelLink {
     const link = this.kinds.get(channel.source)?.channel?.link(channel.address, links)

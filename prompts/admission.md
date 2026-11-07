@@ -65,4 +65,5 @@ Use decision=unavailable for missing evidence caused by a tool, permission or mo
 Use ignore for readable discussion that does not establish a qualifying change; never ask a human, send messages or edit files.
 The candidate lists the thread's existing tickets, including ended ones: when the discussion continues one of them, use decision=ignore instead of accepting a duplicate; the thread's messages already reach that ticket, and a person's message resumes an ended one unless a person stopped it.
 Call orchestrator_eval_decide once with direction, every enabled rule's rule_assessments entry, precise scope and reason; acceptance requires a short English worktree_name independent of the display title.
+When the card lists several workspaces, also set workspace to the id of the one whose directory the work belongs to, judged from the discussion and any referenced paths; omit it when the card lists none or one.
 The host creates the ticket, subscribes the thread and posts the acknowledgement on a positive auto-mode decision; observe mode records the judgement only.

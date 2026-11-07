@@ -858,7 +858,13 @@ it('reports each setup problem where the operator fixes it, and checks the agent
   // git older than 2.32 ignores GIT_CONFIG_GLOBAL and reads the operator's configuration.
   answers = { ...valid, [HELPERS]: 'file:/home/me/.gitconfig\0!gh auth git-credential\0' }
   await needs('deployment', 'gitTooOld', {})
-  await needs('github', 'repositoryUnset', {}, { github: { repository: '' } })
+  // No repository configured: the GitHub Source is optional, so setup succeeds with GitHub off rather than reporting a problem.
+  answers = { ...valid }
+  const noGithub = await restart({}, { github: { repository: '' } })
+  await noGithub.ready
+  expect(noGithub.setupProblem).toBeUndefined()
+  expect(noGithub.configured()).toBe(true)
+  expect(noGithub.deployment.github).toBeUndefined()
   // A broken Feishu bot leaves Feishu out and says why; GitHub work goes on.
   answers = { ...valid, [`${BOT()} config strict-mode`]: 'strict-mode: off (source: profile)' }
   const next = await restart()

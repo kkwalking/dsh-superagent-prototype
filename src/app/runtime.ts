@@ -10,7 +10,7 @@ import type {} from '@deepseek-ai/dsh-system-prompt'
 import type {} from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-skill'
 import type {} from '@deepseek-ai/dsh-subprocess'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
@@ -39,6 +39,8 @@ import { Outbox } from './outbox.ts'
 import { Passes } from './passes.ts'
 import { Setup } from './setup.ts'
 import { feishuSettings } from '../sources/feishu.ts'
+import { appendChat, readChat } from '../sources/web-store.ts'
+import { webTrigger, type WebChatMessage } from '../sources/web-trigger.ts'
 import { health, type Health, type SourceContext, type SourceHost } from '../sources/host.ts'
 import { Sessions } from './sessions.ts'
 import { Settings } from './settings.ts'
@@ -50,6 +52,52 @@ import { executorTools, type ExecutorToolsHost } from './tools/executor.ts'
 // Source plugins interact with dsh-superagent exclusively through the `SourceHost` service interface.
 declare module '@deepseek-ai/cordis' { interface Context { orchestrator: SourceHost } }
 const now = (): string => new Date().toISOString()
+
+/** A lock whose mtime has not advanced for this long is treated as abandoned, by `proper-lockfile` and the sweep below. */
+export const LOCK_STALE_MS = 30_000
+/** How often the holder refreshes the lock mtime: `proper-lockfile` uses half the stale window. */
+export const LOCK_HEARTBEAT_MS = LOCK_STALE_MS / 2
+
+/**
+ * Names the process holding the state directory, so a start can tell a live holder from a lock left by a killed one.
+ * It sits beside the lock, never inside it: `proper-lockfile` releases the lock with `rmdir`, which fails on a
+ * directory that holds any other entry.
+ */
+const ownerPath = (path: string): string => `${path}.owner`
+
+/** Whether some process still runs under `pid`; a `kill(0)` probe, so it needs no privileges over that process. */
+const alive = (pid: number): boolean => {
+  try { process.kill(pid, 0); return true } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM' }
+}
+
+/**
+ * Locks the state directory, first clearing a lock whose owner is gone. `lockSync` neither retries nor reclaims a lock
+ * whose mtime is fresh, so a process replacing a `kill -9`ed one straight away would fail to load the plugin and leave
+ * the service up with no orchestrator — exactly what an operator does after a crash. Neither the mtime alone nor a
+ * missing owner file is enough: right after a kill both still look live. So the holder records its pid, and the lock is
+ * cleared only when that pid no longer runs, or when it was never recorded and its mtime went stale.
+ */
+export function lockStateDir(stateDir: string, onCompromised: (error: Error) => void): () => void {
+  const path = `${stateDir}.lock`
+  const owner = ownerPath(path)
+  const abandoned = (): boolean => {
+    const pid = Number(readFileSync(owner, 'utf8'))
+    if (Number.isSafeInteger(pid) && pid > 0) return !alive(pid)
+    // A lock from a version that recorded no owner, or one being created right now: only its age can tell.
+    return Date.now() - statSync(path).mtimeMs > LOCK_HEARTBEAT_MS
+  }
+  try { if (abandoned()) rmSync(path, { recursive: true, force: true }) }
+  catch (error) {
+    // A missing lock is the common case and needs nothing else.
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') rmSync(path, { recursive: true, force: true })
+  }
+  const release = lockSync(stateDir, { stale: LOCK_STALE_MS, onCompromised })
+  try { writeFileSync(owner, String(process.pid)) } catch { /* the lock still holds; only recovery loses its hint */ }
+  return () => {
+    try { rmSync(owner, { force: true }) } catch { /* a leftover owner file only costs the next start one liveness check */ }
+    release()
+  }
+}
 
 /**
  * Composition root of dsh-superagent that connects `Store`, `Setup`, `Engine`, `SourceRegistry`, `Effects`, `Outbox`, `Passes`, `Sessions`, `Settings`, `Prompts`, `DshExecutor`, and `MasterAssessor`.
@@ -90,7 +138,7 @@ export class Runtime extends Service implements SourceHost {
     // Lock the state directory before opening the database so another process cannot migrate or write concurrently.
     mkdirSync(machine.stateDir, { recursive: true, mode: 0o700 })
     const compromised = (error: Error) => { this.runtimeHealth.set({ state: 'error', detail: error.message }); this.stopped.abort() }
-    const release = lockSync(machine.stateDir, { stale: 30_000, onCompromised: compromised })
+    const release = lockStateDir(machine.stateDir, compromised)
     this.releaseLock = async () => { release() }
     let opened: Store | undefined
     try {
@@ -111,7 +159,7 @@ export class Runtime extends Service implements SourceHost {
         if (kind.policy?.sync) void this.ready?.then(() => this.settings.syncable().includes(kind.kind) ? this.settings.sync(kind.kind) : undefined)
           .catch(() => { /* sync() records its failure in health. */ })
         return () => {}
-      })
+      }, { state: { get: name => store.get(name), set: (name, value) => { if (value === undefined) store.delete(name); else store.set(name, value) }, keys: prefix => store.keys(prefix) } })
       const links: LinkHost = { store, links: this.sourceLinks, commands, sources, lifetime: this.lifetime }
       const link = (trigger: Trigger, signal?: AbortSignal) => sourceLink(links, trigger, signal)
       const environment = (ticket: Ticket) => this.ticketEnvironment(ticket)
@@ -158,7 +206,8 @@ export class Runtime extends Service implements SourceHost {
         health: this.runtimeHealth, lifetime: this.lifetime, configured: () => setup.configured(), closing: () => this.closing() })
       this.sourceDeps = { store, engine, outbox, commands, sources, get ready() { return runtime.ready },
         get deployment() { return setup.deployment }, configured: () => setup.configured(),
-        get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem }, receive: trigger => passes.receive(trigger) }
+        get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
+        get telegramProblem() { return setup.telegramProblem }, receive: trigger => passes.receive(trigger) }
       this.toolHost = { context: ctx, engine, store, prompts, sessions, settings: this.settings, assessor, resources,
         get github() { return runtime.context({ kind: 'github', health: ['github'] }) },
         requestPass: () => { passes.request() }, sendReplies: () => outbox.sent(),
@@ -180,6 +229,7 @@ export class Runtime extends Service implements SourceHost {
   get setupProblem(): SetupProblem | undefined { return this.setup.problem }
   /** Why the Feishu bot is unavailable even though the Feishu Source configures a CLI. */
   get feishuProblem(): SetupProblem | undefined { return this.setup.feishuProblem }
+  get telegramProblem(): SetupProblem | undefined { return this.setup.telegramProblem }
   links(): LinkTarget {
     const resolved = this.setup.configured() ? this.setup.deployment : undefined
     const links = resolved ? { repository: resolved.repository, ...(resolved.feishu ? { feishu: resolved.feishu } : {}) } : {}
@@ -192,6 +242,21 @@ export class Runtime extends Service implements SourceHost {
   }
   checkSetup(): void { this.setup.check() }
   receive(trigger: Trigger): ReceiveResult { return this.passes.receive(trigger) }
+  /**
+   * Feeds one panel chat message into the pipeline: records the person's turn in the conversation log, then hands the
+   * Trigger to the Engine. Returns the updated log so the panel shows the message immediately. Requires the web Source.
+   */
+  chatSend(input: { conversation: string; messageId: string; text: string; actor?: string }): WebChatMessage[] {
+    const context = this.context({ kind: 'web', health: ['web'] })
+    const config = context.config<{ actor?: string }>('web')
+    const actor = input.actor?.trim() || config?.actor?.trim() || 'operator'
+    const at = new Date().toISOString()
+    const log = appendChat(context, input.conversation, { id: input.messageId, role: 'person', text: input.text, at })
+    this.passes.receive(webTrigger({ conversation: input.conversation, messageId: input.messageId, text: input.text, actor, at }))
+    return log
+  }
+  /** The stored chat log of one conversation, oldest first. */
+  chatLog(conversation: string): WebChatMessage[] { return readChat(this.context({ kind: 'web', health: ['web'] }), conversation) }
   idle(): Promise<void> { return this.passes.idle() }
   pump(): Promise<void> { return this.passes.pump() }
   sendReplies(): Promise<void> { return this.outbox.sent() }
@@ -223,7 +288,8 @@ export class Runtime extends Service implements SourceHost {
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
-      checkSetup: () => { setup.check() }, requestPass: () => { passes.request() }, models: () => this.ctx.sessionController.modelCatalog() }
+      checkSetup: () => { setup.check() }, requestPass: () => { passes.request() }, models: () => this.ctx.sessionController.modelCatalog(),
+      chatSend: input => runtime.chatSend(input), chatLog: conversation => runtime.chatLog(conversation) }
   }
   /** Idempotent stop; concurrent or repeated calls share the same shutdown promise. */
   stop(): Promise<void> { return this.stopping ??= this.shutdown() }

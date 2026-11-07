@@ -60,7 +60,15 @@ def ps(*options, check=False):
     for line in result.stdout.splitlines():
         parts = line.split(None, 2)
         if len(parts) == 3 and parts[0].isdigit():
-            yield int(parts[0]), parts[1], parts[2].split()
+            words = parts[2].split()
+            yield int(parts[0]), interpreter(words[0]) if words else parts[1], words
+
+
+def interpreter(word):
+    """Return the program name a process was started with, from the first argument of `ps`: on Linux `ucomm` reports the
+    main thread's name (`MainThread` for Node.js) rather than the program, so the command line is the only reliable source."""
+    name = os.path.basename(word)
+    return 'node' if name in ('node', 'nodejs') else name
 
 
 def running(pid, profile):
@@ -174,12 +182,28 @@ def start(args):
         log.touch()
         prune_logs(args.profile)
         # `exec` replaces the shell so the pane PID printed by tmux is the DSH service process itself.
-        command = ('umask 077; exec ' + shlex.join([dsh, '--profile', args.profile, '--no-open'])
+        # A public URL behind a tunnel needs `--trusted-host` too, or the host refuses its cookie there; the panel's
+        # management API admits only the loopback authority, so the proxy in front of it rewrites Host instead.
+        public = [('--public-url', args.public_url)] if args.public_url else []
+        public += [('--trusted-host', host) for host in args.trusted_host]
+        command = ('umask 077; exec ' + shlex.join([dsh, '--profile', args.profile, '--no-open', *[word for pair in public for word in pair]])
                    + ' >> ' + shlex.quote(str(log)) + ' 2>&1')
         # Reuse an existing tmux session without disturbing other windows.
         target = ['new-window', '-t', '=' + session + ':'] if exists else ['new-session', '-s', session]
-        pane = subprocess.run(['tmux', *target, '-d', '-P', '-F', '#{pane_pid}', '-n', 'server', '-c', str(ROOT), command],
-                              check=True, capture_output=True, text=True).stdout.strip()
+        # tmux starts the pane from its own server environment, not this process's, so proxy variables set here (by the
+        # watchdog or the launchd plist) would be lost and a worker's `fetch` (Telegram, web) would go direct. Forward them
+        # with `-e` (tmux >= 3.2) so the service keeps whatever proxy this start was given.
+        proxy_env = [word for name in ('HTTPS_PROXY', 'HTTP_PROXY', 'ALL_PROXY', 'NO_PROXY', 'NODE_USE_ENV_PROXY',
+                                       'https_proxy', 'http_proxy', 'all_proxy', 'no_proxy')
+                     if name in os.environ and os.environ[name] != '' for word in ('-e', f'{name}={os.environ[name]}')]
+        try:
+            pane = subprocess.run(['tmux', *target, *proxy_env, '-d', '-P', '-F', '#{pane_pid}', '-n', 'server', '-c', str(ROOT), command],
+                                  check=True, capture_output=True, text=True).stdout.strip()
+        except subprocess.CalledProcessError:
+            # An older tmux without `-e`: fall back to the bare command (the service runs, reaching the network only if
+            # the tmux server already carries the proxy variables).
+            pane = subprocess.run(['tmux', *target, '-d', '-P', '-F', '#{pane_pid}', '-n', 'server', '-c', str(ROOT), command],
+                                  check=True, capture_output=True, text=True).stdout.strip()
         if pane.isdigit():
             (control(args.profile) / 'service.pid').write_text(pane + '\n')
         print('Log: ' + str(log), flush=True)
@@ -218,6 +242,11 @@ def main():
                         help='Graceful shutdown timeout in seconds; running Executor Sessions finish their step first.')
     parser.add_argument('--respect-stop', action='store_true',
                         help='For monitoring: never start/restart after an intentional stop.')
+    parser.add_argument('--public-url', default=os.environ.get('DSH_SUPERAGENT_PUBLIC_URL') or '',
+                        help='URL a tunnel serves this profile at; passed to DSH as --public-url.')
+    parser.add_argument('--trusted-host', action='append', default=[],
+                        metavar='AUTHORITY',
+                        help='Public authority DSH admits its cookie for, repeatable; pass the --public-url host.')
     args = parser.parse_args()
     if args.timeout <= 0 or args.stop_timeout <= 0:
         parser.error('--timeout and --stop-timeout must be positive')

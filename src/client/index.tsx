@@ -12,6 +12,8 @@ import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { openKnownSession, SessionNavigationError } from '../navigation.ts'
 import { App } from './app.tsx'
+import { ChatPanel } from './chat.tsx'
+import { PanelProvider } from './provider.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
 import { en, zh } from './locales.ts'
 import type { T } from './text.ts'
@@ -19,6 +21,7 @@ import type { T } from './text.ts'
 type ClientContext = Context & { sessions: ISessions }
 const NS = 'dshSuperagent'
 const PANEL_ID = 'dsh-superagent' as MainPanelId
+const CHAT_PANEL_ID = 'dsh-superagent-chat' as MainPanelId
 const ENTRY = 'dsh-superagent'
 
 function HammerIcon({ size }: SidebarPanelIconOwnerProps) {
@@ -45,6 +48,15 @@ function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
   return <App t={t} openSession={openSession} deploymentForm={form} />
 }
 
+function ChatIcon({ size }: SidebarPanelIconOwnerProps) {
+  return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M4 5.5h16v11H9l-3.5 3v-3H4z" /><path d="M8 10h8M8 13h5" />
+  </svg>
+}
+function MountedChat({ ctx, t }: { ctx: ClientContext; t: T }) {
+  return <PanelProvider t={t}><div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}><ChatPanel /></div></PanelProvider>
+}
+
 export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace']
 /** Registers the panel, sidebar icon, and Plugin Manager config view; `configForms` is optional (without it, machine settings are read-only). */
 export function apply(ctx: ClientContext): void {
@@ -55,4 +67,8 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 10, label: () => t('panel'), locale: NS }, HammerIcon))
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register({ name: 'plugins.row.config', key: `${ENTRY}#${ENTRY}`, locale: NS },
     (props: PluginConfigViewProps & { t: T }) => <PluginConfig t={props.t} view={props.view} form={props.form} />))
+  // A separate sidebar entry and page for the chat Source, beside the Superagent management panel.
+  ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: CHAT_PANEL_ID, locale: NS, inject: () => ({}) },
+    (props: { t: T }) => <MountedChat ctx={ctx} t={props.t} />))
+  ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: CHAT_PANEL_ID, order: 11, label: () => t('chatPanel'), locale: NS }, ChatIcon))
 }

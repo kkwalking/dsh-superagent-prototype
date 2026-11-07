@@ -10,6 +10,13 @@
     - id: dsh-superagent-feishu
       name: dsh-superagent/feishu-watch
       disabled: true
+    # Telegram is optional like Feishu: enabled from the panel by naming the env var that holds the bot token.
+    - id: dsh-superagent-telegram
+      name: dsh-superagent/telegram-watch
+      disabled: true
+    # Panel chat Source: on by default, since it needs no external account — a workspace directory is enough.
+    - id: dsh-superagent-web
+      name: dsh-superagent/web-watch
     # The agent preset of every Executor Session (WORKER_PRESET in src/app/sessions.ts); the main Session has its own, below.
     # It is DSH's `standard` preset with only what a worker needs, and a shell whose foreground command moves to a background job
     # after 5 seconds, so a long command does not hold back a person's message, which the Session takes at its next step. Left

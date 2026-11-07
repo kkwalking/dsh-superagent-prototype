@@ -11,9 +11,11 @@ export const testMachine = (overrides: Partial<Machine> = {}): Machine => ({
   stateDir: '/tmp/dsh-superagent-test', promptMaxChars: reference(100000), admissionContextMaxPages: reference(10),
   admissionContextTimeoutMs: reference(15000), ...overrides,
 })
-export const testDeployment = (overrides: Partial<Deployment> = {}): Deployment => ({
+/** A deployment fixture whose GitHub identity is always present, so tests may read `github.*` without narrowing. */
+export type TestDeployment = Deployment & { github: NonNullable<Deployment['github']> }
+export const testDeployment = (overrides: Partial<Deployment> = {}): TestDeployment => ({
   ...testMachine(), repository: 'acme/widgets',
   github: { cli: '/bin/false', login: 'agent-bot', noreply: '7+agent-bot@users.noreply.github.com' },
   feishu: { cli: '/bin/false', botId: 'ou_bot', appId: 'cli_bot', brand: 'feishu', name: 'Widgets Bot' },
   ...overrides,
-})
+}) as TestDeployment

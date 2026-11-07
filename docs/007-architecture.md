@@ -372,9 +372,18 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/feishu-loops.ts` | The Feishu loops: the event consumer, history recovery, chat names and polling of subscribed topics |
 | `src/sources/feishu-channel.ts` | The Feishu Channel: topic replies, `sent` or `gone` |
 | `src/sources/feishu-read.ts` | The `feishu/` reads of a Trigger's message, its root, parent and topic, and `feishuThreadContext`, which gives them to assessments with their images |
+| `src/sources/telegram.ts` | The Telegram kind and plugin entry, exported as `./telegram-watch`: which chats it receives from, the Policy of Telegram users, and the bot identity as a fact |
+| `src/sources/telegram-trigger.ts` | Telegram messages as Triggers: the mention rule, the chat and forum topic as the Thread, and the refusal of bot, channel-post and forwarded messages |
+| `src/sources/telegram-api.ts` | The Bot API client over `fetch`: `getUpdates` long polling, `getMe`, `sendMessage`, `getChat`, and `TelegramError` |
+| `src/sources/telegram-loops.ts` | The Telegram poll loop, which advances the `getUpdates` offset only after a whole batch reached the Engine, and the chat titles for Thread labels |
+| `src/sources/telegram-channel.ts` | The Telegram Channel: a reply under the Trigger's message, `sent` or `gone`, with the Bot API text limit |
+| `src/sources/web.ts` | The web chat kind and plugin entry, exported as `./web-watch`: a panel chat whose messages become Triggers, and a Channel that records the agent's replies back into the chat log |
+| `src/sources/web-trigger.ts` | A panel chat message as a Trigger (a direct, human request), the conversation as the Thread, and the `WebChatMessage` log entry |
+| `src/sources/web-store.ts` | The web chat conversation log: reading and appending the person and agent turns the panel shows, bounded per conversation |
 | `src/sources/admission-context.ts` | The bounded window an assessment starts from: the first pages of a Trigger's Thread, read through its kind, and the messages around the Trigger |
 | `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for the assessing Session |
-| `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel and the page in DeepSeek Harness's Plugin Manager |
+| `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel and the page in DeepSeek Harness's Plugin Manager, plus the separate chat panel and its sidebar entry |
+| `src/client/chat.tsx` | The panel chat page: a plain conversation with the agent over the `web` Source's chat log, with a message box that sends a request |
 | `src/client/app.tsx` | The panel: header, search, glossary, tabs and the page of the current route |
 | `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
 | `src/client/api.ts` | Calls and polls of the management API, typed by `src/app/api.ts`, and the Decision filters of the Eval status |
@@ -421,6 +430,12 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/queue.spec.ts` | The Runtime's work through the effect queue, and what earlier versions stored |
 | `tests/followups.spec.ts` | A person's follow-up on a Ticket's Thread: its notice to the main Session, the tools that act on it, what a burst costs; a worker's hand-back and context follow, and the main Session's note |
 | `tests/health.spec.ts` | One health entry per part, each cleared by its own next success |
+| `tests/telegram-trigger.spec.ts` | Telegram messages as Triggers: the mention rule, forum topics as separate Threads, and the refusal of bot, channel-post and forwarded messages |
+| `tests/telegram-loops.spec.ts` | The Telegram poll loop: the offset advances past a whole batch and stays put when nothing arrived, an uningested update kind is read without ingesting it, and an unset token variable reports an error instead of reading |
+| `tests/telegram-api.spec.ts` | The Bot API client against a local stand-in server: the envelope, `error_code`, `retry_after`, the `getUpdates` offset, and `sendMessage` inside a topic |
+| `tests/lock.spec.ts` | The state-directory lock: a live owner keeps it, and a start reclaims the lock of an owner that no longer runs |
+| `tests/workspace.spec.ts` | Work targets: resolving a chosen workspace to its directory (implicit single target, configured roots, empty-directory default, unknown-id fallback), a Ticket's directory under its workspace, and the assessment's workspace choice |
+| `tests/web.spec.ts` | The web chat Source: a message as a direct human Trigger on its conversation Thread, the bounded chat log, and the Channel recording the agent's reply (or dropping one with no conversation) |
 | `tests/delivery.spec.ts` | `AgentDelivery` |
 | `tests/retry-health.spec.ts`, `tests/role-models.spec.ts` | Model budget retries, and the models of the two roles |
 | `tests/runtime.spec.ts` | The whole application on a simulated DeepSeek Harness host, through tools and HTTP |

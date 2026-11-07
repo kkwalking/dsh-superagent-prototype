@@ -29,7 +29,7 @@ export function directionAllowed(value: unknown): value is AdmissionDirection {
 }
 export interface Assessment {
   decision: 'accept' | 'ignore' | 'unavailable'; rule_assessments: RuleAssessment[]; direction: unknown
-  title: string; scope: string; reason: string; intent_evidence?: string | null; acknowledgement?: string | null; worktree_name?: string
+  title: string; scope: string; reason: string; intent_evidence?: string | null; acknowledgement?: string | null; worktree_name?: string; workspace?: string
 }
 /**
  * Validate an assessment against enabled rules and convert it into an engine `AssessmentOutcome`.
@@ -37,7 +37,7 @@ export interface Assessment {
  * inferred candidate only in `auto` mode (otherwise recording it as `would_accept`).
  * @throws when `rule_assessments` does not cover every enabled rule exactly once, or an accept omits `intent_evidence`.
  */
-export function assessmentOutcome(assessment: Assessment, settings: Pick<Settings, 'policy' | 'eval'>, strength: Strength): AssessmentOutcome {
+export function assessmentOutcome(assessment: Assessment, settings: Pick<Settings, 'policy' | 'eval' | 'executor'>, strength: Strength): AssessmentOutcome {
   const enabled = settings.policy.rules.filter(rule => rule.enabled)
   const judged = assessment.rule_assessments
   const ids = new Set(judged.map(item => item.rule_id))
@@ -52,12 +52,15 @@ export function assessmentOutcome(assessment: Assessment, settings: Pick<Setting
   if (!matches.length) return { kind: 'ignore', audit, reason: { code: 'noRuleMatched' } }
   if (!assessment.intent_evidence) throw new Error('Acceptance requires intent_evidence')
   const { title, scope, worktree_name: name } = assessment
+  // With workspaces configured, keep a chosen id that names one; otherwise the first workspace is used (see resolveWorkspace).
+  const workspaces = settings.executor.workspaces
+  const workspace = workspaces.length ? (workspaces.find(item => item.id === assessment.workspace)?.id ?? workspaces[0]!.id) : undefined
   if (strength === 'inferred' && settings.eval.mode !== 'auto') {
-    const proposal = { title, scope, worktree_name: name }
+    const proposal = { title, scope, worktree_name: name, ...workspace ? { workspace } : {} }
     return { kind: 'ignore', audit: { ...audit, would_accept: true, proposal }, reason: { code: 'observed', values: { text: assessment.reason } } }
   }
   return { kind: 'accept', title, scope, reason: assessment.reason, ...(assessment.acknowledgement ? { acknowledgement: assessment.acknowledgement } : {}),
-    rules: matches.map(match => match.rule_id), audit, ...(name ? { name } : {}) }
+    rules: matches.map(match => match.rule_id), audit, ...(name ? { name } : {}), ...(workspace ? { workspace } : {}) }
 }
 const DEFAULT_RULES = [
   { id: 'copy', name: 'Copy fixes', enabled: true, instruction: 'Explicit requests to correct a typo, wording, punctuation or existing translation. Preserve product promises and business meaning.' },
@@ -87,13 +90,29 @@ export const EvalConfigSchema = z.object({
 }).strict()
 const CommandNameSchema = z.string().regex(/^[A-Za-z0-9._-]+$/).refine(name => name !== '.' && name !== '..', 'Not a command name')
   .refine(name => !WORKER_COMMANDS.includes(name), `${WORKER_COMMANDS.join(', ')} cannot be blocked`)
-/** Executor settings: worker model, concurrency, ticket directory root (empty defaults to `<stateDir>/work`), `prepare` command, and blocked commands. */
+/**
+ * One work target: a `directory` the Executor works in, named by a short slug `id`. The directory need not be a git
+ * repository or on any hosting service; git (GitHub, Gitee, GitLab, a bare repo) is only one way a `prepare` command can
+ * fill it. An empty `directory` defaults to `<ticket root>/<id>`.
+ */
+export const WorkspaceNameSchema = z.string().trim().regex(/^[a-z][a-z0-9-]{0,31}$/, 'A short lowercase slug, e.g. web-app')
+export const WorkspaceSchema = z.object({
+  id: WorkspaceNameSchema,
+  directory: z.string().trim().refine(path => path === '' || path.startsWith('/'), 'An absolute path, or empty for a directory under the ticket root').default(''),
+}).strict()
+export type Workspace = z.infer<typeof WorkspaceSchema>
+/**
+ * Executor settings: worker model, concurrency, the ticket directory root (empty defaults to `<stateDir>/work`), `prepare`
+ * command, blocked commands, and the named workspaces Eval chooses among. With no workspaces, work runs under the root as
+ * one implicit workspace (the single-target behavior), so existing installations keep working unchanged.
+ */
 export const ExecutorConfigSchema = z.object({
   model: RoleModelSchema.nullable().default(null),
   maxWorkers: z.number().int().min(LIMITS.maxWorkers.min).max(LIMITS.maxWorkers.max).default(3),
   directory: z.string().trim().refine(path => path === '' || path.startsWith('/'), 'An absolute path, or empty for <stateDir>/work').default(''),
   prepare: z.string().max(LIMITS.prepareCommand).default(''),
   blockedCommands: z.array(CommandNameSchema).default([]),
+  workspaces: z.array(WorkspaceSchema).refine(list => new Set(list.map(item => item.id)).size === list.length, 'Duplicate workspace ids').default([]),
 }).strict()
 export const SourceInstanceSchema = z.object({ enabled: z.boolean().default(true), config: z.record(z.string(), z.unknown()).default({}) }).strict()
 export const SettingsSchema = z.object({
