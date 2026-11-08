@@ -134,15 +134,27 @@ export class Sessions {
       if (status === 'idle' && !this.host.closing()) { this.retryHealth.clear(agent.id); this.updateModelHealth() }
     })
   }
-  /** Resolves or creates session `id` in workspace `cwd`, initializes its role model, decorates it with prompts/skills/tools, sets `danger-full-access` permissions, and renames it to `title`. */
+  /**
+   * Resolves or creates session `id` in directory `cwd`, initializes its role model, decorates it with prompts/skills/tools,
+   * sets `danger-full-access` permissions, and renames it to `title`.
+   *
+   * A worker Session is created against its directory alone (`cwd`) and registers no Workspace: an Executor Session is
+   * machinery of one Ticket, not a place a person works, so a Workspace record for every Ticket directory would fill the
+   * sidebars of every other Session sharing `$DSH_HOME` with one row each. The main Session keeps its Workspace, which a
+   * person opens to talk to dsh-superagent.
+   */
   async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
     const ctx = this.ctx
     let result = await ctx.sessionController.resolveAgent(id as SessionId)
     if ('error' in result && result.error.code === 'session/not-found') {
-      const workspace = await ctx.workspaceRegistry.create(cwd)
       // A Session keeps the preset it was created with, one of the bundle's own (cordis.patch.yml).
-      await ctx.sessionController.create({ sessionId: id as SessionId, workspaceId: workspace.id,
-        agentPreset: role === 'worker' ? WORKER_PRESET : ROUTER_PRESET })
+      const agentPreset = role === 'worker' ? WORKER_PRESET : ROUTER_PRESET
+      if (role === 'worker') {
+        await ctx.sessionController.create({ sessionId: id as SessionId, cwd, agentPreset })
+      } else {
+        const workspace = await ctx.workspaceRegistry.create(cwd)
+        await ctx.sessionController.create({ sessionId: id as SessionId, workspaceId: workspace.id, agentPreset })
+      }
       result = await ctx.sessionController.resolveAgent(id as SessionId)
     }
     if ('error' in result) throw result.error

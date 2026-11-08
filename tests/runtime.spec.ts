@@ -203,7 +203,7 @@ beforeEach(async () => {
     inspect: vi.fn(async () => ({ events: [] })),
   }
   jobs = jobRegistry()
-  services = { agents, llm: { resolveCallConfig: vi.fn(async value => value) }, sessionController: controller, sessionPersistence: { flush: vi.fn(async () => {}), open: vi.fn(async () => ({ read: async () => ({ events: [] }), [Symbol.asyncDispose]: async () => {} })) }, workspaceRegistry: { create: async (cwd: string) => ({ id: cwd }) }, permissionPresets: { set: () => {} }, subprocess, webServer: { host: '127.0.0.1', port: 3082, register: (route: { handler: HttpHandler }) => { http = route.handler; return () => {} } }, jobs: jobs.service }
+  services = { agents, llm: { resolveCallConfig: vi.fn(async value => value) }, sessionController: controller, sessionPersistence: { flush: vi.fn(async () => {}), open: vi.fn(async () => ({ read: async () => ({ events: [] }), [Symbol.asyncDispose]: async () => {} })) }, workspaceRegistry: { create: vi.fn(async (cwd: string) => ({ id: cwd })) }, permissionPresets: { set: () => {} }, subprocess, webServer: { host: '127.0.0.1', port: 3082, register: (route: { handler: HttpHandler }) => { http = route.handler; return () => {} } }, jobs: jobs.service }
   for (const [name, service] of Object.entries(services)) ctx.reflect.provide(name, service)
   for (const cli of [AGENT(), OTHER(), BOT()]) writeFileSync(cli, '#!/bin/sh\n', { mode: 0o755 })
   const store = new Store(join(directory, 'orchestrator.sqlite')); seed(store); store.close()
@@ -1683,6 +1683,21 @@ it('creates an Executor Session under the bundle\'s worker preset, and the main 
   const created = controller.create.mock.calls.map(([options]) => options as { sessionId: string; agentPreset: string })
   expect(created.find(options => options.sessionId === sessionId)).toMatchObject({ agentPreset: 'dsh-superagent-worker' })
   expect(created.find(options => options.sessionId === runtime.masterId)).toMatchObject({ agentPreset: 'dsh-superagent-router' })
+})
+
+it('creates an Executor Session against its directory alone, so no Workspace joins the sidebars other Sessions share', async () => {
+  const workspaceRegistry = (runtime as unknown as { ctx: Context }).ctx.get('workspaceRegistry') as unknown as
+    { create: ReturnType<typeof vi.fn> }
+  // The main Session was created at startup, with its own Workspace: a person opens it to talk to dsh-superagent.
+  expect(workspaceRegistry.create).toHaveBeenCalledWith(runtime.machine.stateDir)
+  workspaceRegistry.create.mockClear()
+  const { sessionId, ticket } = await acceptedTicket()
+  const created = controller.create.mock.calls.map(([options]) => options as { sessionId: string; cwd?: string; workspaceId?: string })
+  const worker = created.find(options => options.sessionId === sessionId)!
+  // The Ticket's own directory is the Session's cwd, and no Workspace record was made for it.
+  expect(worker).toMatchObject({ cwd: ticket.execution!.directory })
+  expect(worker.workspaceId).toBeUndefined()
+  expect(workspaceRegistry.create).not.toHaveBeenCalled()
 })
 
 it('selects its own preset again for a main Session or worker a person switched before its first turn, and not after it', async () => {

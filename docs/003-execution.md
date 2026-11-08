@@ -28,6 +28,8 @@ Executor Sessions run commands without approval as the operator's OS user. Their
 
 The main Session uses `dsh-superagent-router`, with the same 5-second shell and job-wait limits and a smaller tool set for routing. Sessions retain the preset selected at creation. Worker subagents use DeepSeek Harness's `standard` preset.
 
+An Executor Session is created against its directory alone and registers no DeepSeek Harness Workspace, because it is machinery of one Ticket rather than a place a person works: a Workspace record per Ticket directory would take a row in the sidebar of every Session sharing `$DSH_HOME`. The main Session keeps its Workspace, which a person opens to talk to dsh-superagent.
+
 ### Background work and worker slots
 
 When a turn ends with shell jobs or subagents still running, the Ticket keeps its worker slot and stays working. It is not reported as waiting, and the main Session receives no waiting report. A completed job or subagent wakes the Executor with its result in the same slot. Once a turn ends with no background work, the Executor reports waiting normally.
